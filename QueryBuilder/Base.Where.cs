@@ -105,7 +105,7 @@ namespace SqlKata
             return AddComponent("where", new RawCondition
             {
                 Expression = sql,
-                Bindings = Helper.Flatten(bindings).ToArray(),
+                Bindings = bindings,
                 IsOr = GetOr(),
                 IsNot = GetNot(),
             });
@@ -202,6 +202,8 @@ namespace SqlKata
             {
                 Column = column,
                 Value = true,
+                IsOr = GetOr(),
+                IsNot = GetNot(),
             });
         }
 
@@ -216,6 +218,8 @@ namespace SqlKata
             {
                 Column = column,
                 Value = false,
+                IsOr = GetOr(),
+                IsNot = GetNot(),
             });
         }
 

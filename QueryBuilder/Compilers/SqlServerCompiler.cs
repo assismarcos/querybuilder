@@ -1,20 +1,16 @@
-using System;
-using System.Linq;
-
 namespace SqlKata.Compilers
 {
     public class SqlServerCompiler : Compiler
     {
-        public bool UseLegacyPagination { get; set; } = true;
-
-
         public SqlServerCompiler()
         {
-            EngineCode = "sqlsrv";
             OpeningIdentifier = "[";
             ClosingIdentifier = "]";
             LastId = "SELECT scope_identity() as Id";
         }
+
+        public override string EngineCode { get; } = EngineCodes.SqlServer;
+        public bool UseLegacyPagination { get; set; } = true;
 
         protected override SqlResult CompileSelectQuery(Query query)
         {
@@ -38,8 +34,10 @@ namespace SqlKata.Compilers
             {
                 query.Select("*");
             }
+
             var order = CompileOrders(ctx) ?? "ORDER BY (SELECT 0)";
-            query.SelectRaw($"ROW_NUMBER() OVER ({order}) AS [row_num]", ctx.Bindings);
+
+            query.SelectRaw($"ROW_NUMBER() OVER ({order}) AS [row_num]", ctx.Bindings.ToArray());
 
             query.ClearComponent("order");
 
@@ -148,20 +146,17 @@ namespace SqlKata.Compilers
         protected override string CompileBasicDateCondition(SqlResult ctx, BasicDateCondition condition)
         {
             var column = Wrap(condition.Column);
+            var part = condition.Part.ToUpper();
 
             string left;
 
-            if (condition.Part == "time")
+            if (part == "TIME" || part == "DATE")
             {
-                left = $"CAST({column} as time)";
-            }
-            else if (condition.Part == "date")
-            {
-                left = $"CAST({column} as date)";
+                left = $"CAST({column} AS {part.ToUpper()})";
             }
             else
             {
-                left = $"DATEPART({condition.Part.ToUpper()}, {column})";
+                left = $"DATEPART({part.ToUpper()}, {column})";
             }
 
             var sql = $"{left} {condition.Operator} {Parameter(ctx, condition.Value)}";
@@ -172,15 +167,6 @@ namespace SqlKata.Compilers
             }
 
             return sql;
-        }
-    }
-
-    public static class SqlServerCompilerExtensions
-    {
-        public static string ENGINE_CODE = "sqlsrv";
-        public static Query ForSqlServer(this Query src, Func<Query, Query> fn)
-        {
-            return src.For(SqlServerCompilerExtensions.ENGINE_CODE, fn);
         }
     }
 }

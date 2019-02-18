@@ -1,10 +1,10 @@
 using System.Collections;
-using SqlKata;
+using System.Linq;
 using Xunit;
 
 namespace SqlKata.Tests
 {
-    public class HelperTest
+    public class HelperTests
     {
         [Theory]
         [InlineData("")]
@@ -97,7 +97,7 @@ namespace SqlKata.Tests
         }
 
         [Fact]
-        public void Flatten_ReturnFlatttenCollecitonRecursivity_IfArrayIsNested()
+        public void Flatten_ReturnFlatttenDeepCollectionRecursively_IfArrayIsNested()
         {
             // Given
             var objects = new object[]
@@ -118,10 +118,53 @@ namespace SqlKata.Tests
             };
 
             // When
-            var flatten = Helper.Flatten(objects);
+            var flatten = Helper.FlattenDeep(objects);
 
             // Then
             Assert.Equal(new object[] { 1, 0.1, 'A', 'A', "B", "C", 'D' }, flatten);
+        }
+
+        [Fact]
+        public void Flatten_FlatOneLevel()
+        {
+            // Given
+            var objects = new object[]
+            {
+                1,
+                new object[]
+                {
+                    2,
+                    3,
+                    new [] {4,5,6}
+                }
+            };
+
+            // When
+            var flatten = Helper.Flatten(objects);
+
+            // Then
+            Assert.Equal(new[] { 4, 5, 6 }, flatten.ElementAt(3));
+        }
+        [Fact]
+        public void Flatten_ShouldRemoveEmptyCollections()
+        {
+            // Given
+            var objects = new object[]
+            {
+                1,
+                new object[] {},
+                new object[]
+                {
+                    2,
+                    3,
+                }
+            };
+
+            // When
+            var flatten = Helper.Flatten(objects);
+
+            // Then
+            Assert.Equal(new object[] { 1, 2, 3 }, flatten);
         }
 
         [Fact]
@@ -138,7 +181,7 @@ namespace SqlKata.Tests
         }
 
         [Fact]
-        public void IsArray_ReturnFlase_IfTypeOfValueIsString()
+        public void IsArray_ReturnFalse_IfTypeOfValueIsString()
         {
             // Given
             var value = "string";
@@ -151,7 +194,7 @@ namespace SqlKata.Tests
         }
 
         [Fact]
-        public void IsArray_ReturnTrue_IfValueIsExactlyIEnuerable()
+        public void IsArray_ReturnTrue_IfValueIsExactlyIEnumerable()
         {
             // Given
             var value = new object[] { 1, 'B', "C" };
@@ -172,6 +215,14 @@ namespace SqlKata.Tests
         public void ExpandExpression(string input, string expected)
         {
             Assert.Equal(expected, string.Join(", ", Helper.ExpandExpression(input)));
+        }
+
+        [Fact]
+        public void ExpandParameters()
+        {
+            var expanded = Helper.ExpandParameters("where id = ? or id in (?) or id in (?)", "?", new object[] { 1, new[] { 1, 2 }, new object[] { } });
+
+            Assert.Equal("where id = ? or id in (?,?) or id in ()", expanded);
         }
     }
 }

@@ -1,18 +1,23 @@
-using SqlKata;
 using SqlKata.Compilers;
+using SqlKata.Tests.Infrastructure;
 using Xunit;
 
-namespace SqlKata.Tests
+namespace SqlKata.Tests.Sqlite
 {
-    public class MySqlLimitTest
+    public class SqliteLimitTests : TestSupport
     {
-        private MySqlCompiler compiler = new MySqlCompiler();
+        private readonly SqliteCompiler compiler;
+
+        public SqliteLimitTests()
+        {
+            compiler = Compilers.Get<SqliteCompiler>(EngineCodes.Sqlite);
+        }
 
         [Fact]
         public void WithNoLimitNorOffset()
         {
             var query = new Query("Table");
-            var ctx = new SqlResult {Query = query};
+            var ctx = new SqlResult { Query = query };
 
             Assert.Null(compiler.CompileLimit(ctx));
         }
@@ -21,7 +26,7 @@ namespace SqlKata.Tests
         public void WithNoOffset()
         {
             var query = new Query("Table").Limit(10);
-            var ctx = new SqlResult {Query = query};
+            var ctx = new SqlResult { Query = query };
 
             Assert.Equal("LIMIT ?", compiler.CompileLimit(ctx));
             Assert.Equal(10, ctx.Bindings[0]);
@@ -31,9 +36,9 @@ namespace SqlKata.Tests
         public void WithNoLimit()
         {
             var query = new Query("Table").Offset(20);
-            var ctx = new SqlResult {Query = query};
+            var ctx = new SqlResult { Query = query };
 
-            Assert.Equal("LIMIT 18446744073709551615 OFFSET ?", compiler.CompileLimit(ctx));
+            Assert.Equal("LIMIT -1 OFFSET ?", compiler.CompileLimit(ctx));
             Assert.Equal(20, ctx.Bindings[0]);
             Assert.Single(ctx.Bindings);
         }
@@ -42,7 +47,7 @@ namespace SqlKata.Tests
         public void WithLimitAndOffset()
         {
             var query = new Query("Table").Limit(5).Offset(20);
-            var ctx = new SqlResult {Query = query};
+            var ctx = new SqlResult { Query = query };
 
             Assert.Equal("LIMIT ? OFFSET ?", compiler.CompileLimit(ctx));
             Assert.Equal(5, ctx.Bindings[0]);

@@ -255,6 +255,7 @@ namespace SqlKata
 
         public Q From(Query query, string alias = null)
         {
+            query = query.Clone();
             query.SetParent((Q)this);
 
             if (alias != null)
@@ -268,12 +269,12 @@ namespace SqlKata
             });
         }
 
-        public Q FromRaw(string expression, params object[] bindings)
+        public Q FromRaw(string sql, params object[] bindings)
         {
             return ClearComponent("from").AddComponent("from", new RawFromClause
             {
-                Expression = expression,
-                Bindings = Helper.Flatten(bindings).ToArray()
+                Expression = sql,
+                Bindings = bindings,
             });
         }
 

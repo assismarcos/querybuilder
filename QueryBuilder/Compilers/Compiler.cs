@@ -1,29 +1,93 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 
 namespace SqlKata.Compilers
 {
-
     public partial class Compiler
     {
-        private readonly ConditionsCompilerProvider compileConditionMethodsProvider;
+        private readonly ConditionsCompilerProvider _compileConditionMethodsProvider;
+        protected virtual string parameterPlaceholder { get; set; } = "?";
+        protected virtual string parameterPlaceholderPrefix { get; set; } = "@p";
+        protected virtual string OpeningIdentifier { get; set; } = "\"";
+        protected virtual string ClosingIdentifier { get; set; } = "\"";
+        protected virtual string ColumnAsKeyword { get; set; } = "AS ";
+        protected virtual string TableAsKeyword { get; set; } = "AS ";
+        protected virtual string LastId { get; set; } = "";
 
-        public string EngineCode;
-        protected string OpeningIdentifier = "\"";
-        protected string ClosingIdentifier = "\"";
-        protected string ColumnAsKeyword = "AS ";
-        protected string TableAsKeyword = "AS ";
-        protected string LastId = "";
-
-        public Compiler()
+        protected Compiler()
         {
-            compileConditionMethodsProvider = new ConditionsCompilerProvider(this);
+            _compileConditionMethodsProvider = new ConditionsCompilerProvider(this);
         }
 
-        public virtual SqlResult Compile(Query query)
+        public virtual string EngineCode { get; }
+
+
+        /// <summary>
+        /// A list of white-listed operators
+        /// </summary>
+        /// <value></value>
+        protected readonly HashSet<string> operators = new HashSet<string>
+        {
+            "=", "<", ">", "<=", ">=", "<>", "!=", "<=>",
+            "like", "not like",
+            "ilike", "not ilike",
+            "like binary", "not like binary",
+            "rlike", "not rlike",
+            "regexp", "not regexp",
+            "similar to", "not similar to"
+        };
+
+        protected HashSet<string> userOperators = new HashSet<string>
+        {
+
+        };
+
+        protected Dictionary<string, object> generateNamedBindings(object[] bindings)
+        {
+            return Helper.Flatten(bindings).Select((v, i) => new { i, v })
+                .ToDictionary(x => parameterPlaceholderPrefix + x.i, x => x.v);
+        }
+
+        protected SqlResult PrepareResult(SqlResult ctx)
+        {
+            ctx.NamedBindings = generateNamedBindings(ctx.Bindings.ToArray());
+            ctx.Sql = Helper.ReplaceAll(ctx.RawSql, parameterPlaceholder, i => parameterPlaceholderPrefix + i);
+            return ctx;
+        }
+
+        private Query TransformAggregateQuery(Query query)
+        {
+            var clause = query.GetOneComponent<AggregateClause>("aggregate", EngineCode);
+            if (clause.Columns.Count == 1 && !query.IsDistinct) return query;
+
+            if (query.IsDistinct)
+            {
+                query.ClearComponent("aggregate", EngineCode);
+                query.ClearComponent("select", EngineCode);
+                query.Select(clause.Columns.ToArray());
+            }
+            else
+            {
+                foreach (var column in clause.Columns)
+                {
+                    query.WhereNotNull(column);
+                }
+            }
+
+            var outerClause = new AggregateClause()
+            {
+                Columns = new List<string> {"*"},
+                Type = clause.Type
+            };
+
+            return new Query()
+                .AddComponent("aggregate", outerClause)
+                .From(query, $"{clause.Type}Query");
+        }
+
+        protected virtual SqlResult CompileRaw(Query query)
         {
             SqlResult ctx;
 
@@ -41,12 +105,13 @@ namespace SqlKata.Compilers
             }
             else
             {
-
                 if (query.Method == "aggregate")
                 {
                     query.ClearComponent("limit")
                         .ClearComponent("order")
                         .ClearComponent("group");
+
+                    query = TransformAggregateQuery(query);
                 }
 
                 ctx = CompileSelectQuery(query);
@@ -64,7 +129,7 @@ namespace SqlKata.Compilers
                 foreach (var cte in cteSearchResult)
                 {
                     var cteCtx = CompileCte(cte);
-                
+
                     cteBindings.AddRange(cteCtx.Bindings);
                     rawSql.Append(cteCtx.RawSql.Trim());
                     rawSql.Append(",\n");
@@ -77,6 +142,50 @@ namespace SqlKata.Compilers
                 ctx.Bindings.InsertRange(0, cteBindings);
                 ctx.RawSql = rawSql.ToString();
             }
+
+            ctx.RawSql = Helper.ExpandParameters(ctx.RawSql, "?", ctx.Bindings.ToArray());
+
+            return ctx;
+        }
+
+        public Compiler Whitelist(params string[] operators)
+        {
+            foreach (var op in operators)
+            {
+                this.userOperators.Add(op);
+            }
+
+            return this;
+        }
+
+        public virtual SqlResult Compile(Query query)
+        {
+            var ctx = CompileRaw(query);
+
+            ctx = PrepareResult(ctx);
+
+            return ctx;
+        }
+
+        public virtual SqlResult Compile(IEnumerable<Query> queries)
+        {
+            var compiled = queries.Select(CompileRaw).ToArray();
+            var bindings = compiled.Select(r => r.Bindings).ToArray();
+            var totalBindingsCount = bindings.Select(b => b.Count).Aggregate((a, b) => a + b);
+
+            var combinedBindings = new List<object>(totalBindingsCount);
+            foreach (var cb in bindings)
+            {
+                combinedBindings.AddRange(cb);
+            }
+
+            var ctx = new SqlResult
+            {
+                RawSql = compiled.Select(r => r.RawSql).Aggregate((a, b) => a + ";\n" + b),
+                Bindings = combinedBindings,
+            };
+
+            ctx = PrepareResult(ctx);
 
             return ctx;
         }
@@ -285,15 +394,6 @@ namespace SqlKata.Compilers
 
         }
 
-        protected virtual SqlResult OnBeforeCompile(SqlResult ctx)
-        {
-            return ctx;
-        }
-
-        public virtual string OnAfterCompile(string sql)
-        {
-            return sql;
-        }
 
         public virtual SqlResult CompileCte(AbstractFrom cte)
         {
@@ -327,7 +427,6 @@ namespace SqlKata.Compilers
 
         protected virtual string CompileColumns(SqlResult ctx)
         {
-
             if (ctx.Query.HasComponent("aggregate", EngineCode))
             {
                 var aggregate = ctx.Query.GetOneComponent<AggregateClause>("aggregate", EngineCode);
@@ -336,14 +435,21 @@ namespace SqlKata.Compilers
                     .Select(x => CompileColumn(ctx, new Column { Name = x }))
                     .ToList();
 
-                var sql = string.Join(", ", aggregateColumns);
+                string sql = string.Empty;
 
-                if (ctx.Query.IsDistinct)
+                if (aggregateColumns.Count == 1)
                 {
-                    sql = "DISTINCT " + sql;
+                    sql = string.Join(", ", aggregateColumns);
+
+                    if (ctx.Query.IsDistinct)
+                    {
+                        sql = "DISTINCT " + sql;
+                    }
+
+                    return "SELECT " + aggregate.Type.ToUpper() + "(" + sql + $") {ColumnAsKeyword}" + WrapValue(aggregate.Type);
                 }
 
-                return "SELECT " + aggregate.Type.ToUpper() + "(" + sql + $") {ColumnAsKeyword}" + WrapValue(aggregate.Type);
+                return "SELECT 1";
             }
 
             var columns = ctx.Query
@@ -382,7 +488,7 @@ namespace SqlKata.Compilers
 
                     ctx.Bindings.AddRange(subCtx.Bindings);
 
-                    combinedQueries.Add($"{combineOperator}({subCtx.RawSql})");
+                    combinedQueries.Add($"{combineOperator}{subCtx.RawSql}");
                 }
                 else
                 {
@@ -521,7 +627,7 @@ namespace SqlKata.Compilers
             return "ORDER BY " + string.Join(", ", columns);
         }
 
-        public string CompileHaving(SqlResult ctx)
+        public virtual string CompileHaving(SqlResult ctx)
         {
             if (!ctx.Query.HasComponent("having", EngineCode))
             {
@@ -578,17 +684,6 @@ namespace SqlKata.Compilers
             return "LIMIT ? OFFSET ?";
         }
 
-        // public virtual string CompileOffset(SqlResult ctx)
-        // {
-        //     if (ctx.Query.GetOneComponent("limit", EngineCode) is LimitOffset limitOffset && limitOffset.HasOffset())
-        //     {
-        //         ctx.Bindings.Add(limitOffset.Offset);
-        //         return "OFFSET ?";
-        //     }
-
-        //     return null;
-        // }
-
         /// <summary>
         /// Compile the random statement into SQL.
         /// </summary>
@@ -622,6 +717,20 @@ namespace SqlKata.Compilers
         private InvalidCastException InvalidClauseException(string section, AbstractClause clause)
         {
             return new InvalidCastException($"Invalid type \"{clause.GetType().Name}\" provided for the \"{section}\" clause.");
+        }
+
+        protected string checkOperator(string op)
+        {
+            op = op.ToLower();
+
+            var valid = operators.Contains(op) || userOperators.Contains(op);
+
+            if (!valid)
+            {
+                throw new InvalidOperationException($"The operator '{op}' cannot be used. Please consider white listing it before using it.");
+            }
+
+            return op;
         }
 
         /// <summary>
