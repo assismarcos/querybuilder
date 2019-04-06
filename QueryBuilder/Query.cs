@@ -9,15 +9,18 @@ namespace SqlKata
         public bool IsDistinct { get; set; } = false;
         public string QueryAlias { get; set; }
         public string Method { get; set; } = "select";
+        public string QueryComment { get; set; }
 
         public Query() : base()
         {
         }
 
-        public Query(string table) : base()
+        public Query(string table, string comment = null) : base()
         {
             From(table);
+            Comment(comment);
         }
+
 
         public bool HasOffset(string engineCode = null)
         {
@@ -59,6 +62,12 @@ namespace SqlKata
         public Query As(string alias)
         {
             QueryAlias = alias;
+            return this;
+        }
+
+        public Query Comment(string comment)
+        {
+            QueryComment = comment;
             return this;
         }
 
@@ -194,13 +203,19 @@ namespace SqlKata
         /// Apply the callback's query changes if the given "condition" is true.
         /// </summary>
         /// <param name="condition"></param>
-        /// <param name="callback"></param>
+        /// <param name="whenTrue">Invoked when the condition is true</param>
+        /// <param name="whenFalse">Optional, invoked when the condition is false</param>
         /// <returns></returns>
-        public Query When(bool condition, Func<Query, Query> callback)
+        public Query When(bool condition, Func<Query, Query> whenTrue, Func<Query, Query> whenFalse = null)
         {
-            if (condition)
+            if (condition && whenTrue != null)
             {
-                return callback.Invoke(this);
+                return whenTrue.Invoke(this);
+            }
+
+            if (!condition && whenFalse != null)
+            {
+                return whenFalse.Invoke(this);
             }
 
             return this;
